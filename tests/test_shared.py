@@ -1,191 +1,215 @@
 """
 tests/test_shared.py
-Tests unitaires pour l'état partagé.
+Tests unitaires pour l'état partagé (shared/state.py).
 """
 
 import pytest
 from datetime import datetime, timedelta
-from shared.state import SharedState, state
+from shared.state import (
+    ajouter_session, obtenir_session, revoquer_session,
+    session_est_valide, lister_sessions_actives, purger_sessions_expirees,
+    ajouter_evenement, obtenir_evenement, taille_queue,
+    ajouter_alerte, lister_alertes, acquitter_alerte,
+    get_stats, reset_stats
+)
 
 
-class TestSharedState:
-    """Tests pour la classe SharedState"""
+class TestGestionSessions:
+    """Tests pour la gestion des sessions"""
 
     def setup_method(self):
         """Réinitialise l'état avant chaque test"""
-        self.state = SharedState()
-        self.state.reset_stats()
+        reset_stats()
+        # Nettoyer les sessions existantes
+        purger_sessions_expirees()
 
-    def test_add_and_get_session(self):
+    def test_ajouter_et_obtenir_session(self):
         """Test d'ajout et récupération d'une session"""
         session = {
-            "token": "test-token-123",
-            "user_id": "user@test.com",
-            "user_name": "Test User",
-            "expires_at": datetime.now() + timedelta(minutes=30)
+            'token': 'test-123',
+            'user_id': 'user@test.com',
+            'user_name': 'Test User',
+            'ip_client': '192.168.1.1',
+            'expires_at': (datetime.now() + timedelta(minutes=30)).isoformat()
         }
-        self.state.add_session("192.168.1.1", session)
-        retrieved = self.state.get_session("192.168.1.1")
-
+        ajouter_session(session)
+        
+        retrieved = obtenir_session('192.168.1.1')
         assert retrieved is not None
-        assert retrieved["token"] == "test-token-123"
-        assert retrieved["user_name"] == "Test User"
+        assert retrieved['user_id'] == 'user@test.com'
+        assert retrieved['token'] == 'test-123'
 
-    def test_remove_session(self):
-        """Test de suppression d'une session"""
+    def test_session_est_valide(self):
+        """Test de validation de session"""
         session = {
-            "token": "test-token",
-            "expires_at": datetime.now() + timedelta(minutes=30)
+            'token': 'test-123',
+            'user_id': 'user@test.com',
+            'ip_client': '192.168.1.1',
+            'expires_at': (datetime.now() + timedelta(minutes=30)).isoformat()
         }
-        self.state.add_session("192.168.1.1", session)
-        removed = self.state.remove_session("192.168.1.1")
+        ajouter_session(session)
+        
+        assert session_est_valide('192.168.1.1') is True
 
-        assert removed == session
-        assert self.state.get_session("192.168.1.1") is None
-
-    def test_get_session_by_token(self):
-        """Test de récupération par token"""
+    def test_session_expiree(self):
+        """Test de session expirée"""
         session = {
-            "token": "test-token-456",
-            "expires_at": datetime.now() + timedelta(minutes=30)
+            'token': 'test-123',
+            'user_id': 'user@test.com',
+            'ip_client': '192.168.1.1',
+            'expires_at': (datetime.now() - timedelta(minutes=1)).isoformat()
         }
-        self.state.add_session("192.168.1.1", session)
-        retrieved = self.state.get_session_by_token("test-token-456")
+        ajouter_session(session)
+        
+        assert session_est_valide('192.168.1.1') is False
 
-        assert retrieved == session
-
-    def test_get_all_sessions(self):
-        """Test de récupération de toutes les sessions"""
-        session1 = {"token": "token1", "expires_at": datetime.now() + timedelta(minutes=30)}
-        session2 = {"token": "token2", "expires_at": datetime.now() + timedelta(minutes=30)}
-
-        self.state.add_session("192.168.1.1", session1)
-        self.state.add_session("192.168.1.2", session2)
-
-        all_sessions = self.state.get_all_sessions()
-        assert len(all_sessions) == 2
-        assert "192.168.1.1" in all_sessions
-        assert "192.168.1.2" in all_sessions
-
-    def test_cleanup_expired_sessions(self):
-        """Test de nettoyage des sessions expirées"""
-        session_valid = {
-            "token": "valid",
-            "expires_at": datetime.now() + timedelta(minutes=30)
-        }
-        session_expired = {
-            "token": "expired",
-            "expires_at": datetime.now() - timedelta(minutes=1)
-        }
-
-        self.state.add_session("192.168.1.1", session_valid)
-        self.state.add_session("192.168.1.2", session_expired)
-
-        count = self.state.cleanup_expired_sessions()
-        assert count == 1
-        assert self.state.get_session("192.168.1.1") is not None
-        assert self.state.get_session("192.168.1.2") is None
-
-    def test_update_session_activity(self):
-        """Test de mise à jour de l'activité"""
+    def test_revoquer_session(self):
+        """Test de révocation de session"""
         session = {
-            "token": "test",
-            "expires_at": datetime.now() + timedelta(minutes=30),
-            "last_activity": datetime.now() - timedelta(minutes=5)
+            'token': 'test-123',
+            'user_id': 'user@test.com',
+            'ip_client': '192.168.1.1',
+            'expires_at': (datetime.now() + timedelta(minutes=30)).isoformat()
         }
-        self.state.add_session("192.168.1.1", session)
-
-        old_activity = session["last_activity"]
-        self.state.update_session_activity("192.168.1.1")
-        new_activity = self.state.get_session("192.168.1.1")["last_activity"]
-
-        assert new_activity > old_activity
-
-    def test_add_event(self):
-        """Test d'ajout d'événement dans la queue"""
-        event = {
-            "ip_client": "192.168.1.1",
-            "domain": "google.com",
-            "method": "GET"
-        }
-        result = self.state.add_event(event)
+        ajouter_session(session)
+        
+        result = revoquer_session('192.168.1.1', 'test')
         assert result is True
-        assert self.state.queue_size() == 1
+        assert obtenir_session('192.168.1.1') is None
 
-    def test_get_event(self):
-        """Test de récupération d'événement"""
-        event = {"ip_client": "192.168.1.1", "domain": "google.com"}
-        self.state.add_event(event)
+    def test_lister_sessions_actives(self):
+        """Test de listage des sessions actives"""
+        session1 = {
+            'token': 'token1',
+            'user_id': 'user1@test.com',
+            'ip_client': '192.168.1.1',
+            'expires_at': (datetime.now() + timedelta(minutes=30)).isoformat()
+        }
+        session2 = {
+            'token': 'token2',
+            'user_id': 'user2@test.com',
+            'ip_client': '192.168.1.2',
+            'expires_at': (datetime.now() + timedelta(minutes=30)).isoformat()
+        }
+        ajouter_session(session1)
+        ajouter_session(session2)
+        
+        sessions = lister_sessions_actives()
+        assert len(sessions) == 2
 
-        retrieved = self.state.get_event(timeout=0.1)
+    def test_purger_sessions_expirees(self):
+        """Test de purge des sessions expirées"""
+        session_valide = {
+            'token': 'valid',
+            'user_id': 'user1@test.com',
+            'ip_client': '192.168.1.1',
+            'expires_at': (datetime.now() + timedelta(minutes=30)).isoformat()
+        }
+        session_expiree = {
+            'token': 'expired',
+            'user_id': 'user2@test.com',
+            'ip_client': '192.168.1.2',
+            'expires_at': (datetime.now() - timedelta(minutes=1)).isoformat()
+        }
+        ajouter_session(session_valide)
+        ajouter_session(session_expiree)
+        
+        count = purger_sessions_expirees()
+        assert count == 1
+        assert obtenir_session('192.168.1.1') is not None
+        assert obtenir_session('192.168.1.2') is None
+
+
+class TestFileEvenements:
+    """Tests pour la file d'événements"""
+
+    def setup_method(self):
+        reset_stats()
+
+    def test_ajouter_et_obtenir_evenement(self):
+        """Test d'ajout et récupération d'événement"""
+        event = {
+            'ip_client': '192.168.1.1',
+            'domain': 'google.com',
+            'method': 'GET'
+        }
+        result = ajouter_evenement(event)
+        assert result is True
+        
+        retrieved = obtenir_evenement(timeout=0.1)
         assert retrieved is not None
-        assert retrieved["domain"] == "google.com"
-        assert "timestamp" in retrieved  # Timestamp auto-ajouté
+        assert retrieved['domain'] == 'google.com'
 
-    def test_queue_full(self):
-        """Test de comportement quand la queue est pleine"""
-        # Créer une nouvelle instance avec petite queue pour test
-        small_state = SharedState()
-        small_state._event_queue = Queue(maxsize=2)
+    def test_taille_queue(self):
+        """Test de la taille de la queue"""
+        assert taille_queue() == 0
+        
+        ajouter_evenement({'domain': 'test1.com'})
+        ajouter_evenement({'domain': 'test2.com'})
+        
+        assert taille_queue() == 2
 
-        assert small_state.add_event({"event": 1}) is True
-        assert small_state.add_event({"event": 2}) is True
-        assert small_state.add_event({"event": 3}) is False  # Queue pleine
 
-    def test_stop_and_is_running(self):
-        """Test d'arrêt du système"""
-        assert self.state.is_running() is True
-        self.state.stop()
-        assert self.state.is_running() is False
+class TestAlertes:
+    """Tests pour la gestion des alertes"""
 
-    def test_get_uptime(self):
-        """Test de calcul de l'uptime"""
-        assert self.state.get_uptime_seconds() >= 0
-        assert isinstance(self.state.get_uptime_formatted(), str)
+    def setup_method(self):
+        reset_stats()
+
+    def test_ajouter_alerte(self):
+        """Test d'ajout d'alerte"""
+        alerte = {
+            'user_id': 'user@test.com',
+            'score_zscore': 3.5,
+            'volume_session_mb': 100,
+            'details': 'Volume anormal'
+        }
+        ajouter_alerte(alerte)
+        
+        alertes = lister_alertes()
+        assert len(alertes) == 1
+        assert alertes[0]['user_id'] == 'user@test.com'
+
+    def test_acquitter_alerte(self):
+        """Test d'acquittement d'alerte"""
+        alerte = {
+            'alerte_id': 'test-alerte-123',
+            'user_id': 'user@test.com',
+            'score_zscore': 3.5,
+            'details': 'Volume anormal',
+            'acquittee': False
+        }
+        ajouter_alerte(alerte)
+        
+        result = acquitter_alerte('test-alerte-123')
+        assert result is True
+        
+        alertes = lister_alertes()
+        assert alertes[0]['acquittee'] is True
+
+
+class TestStats:
+    """Tests pour les statistiques"""
+
+    def setup_method(self):
+        reset_stats()
 
     def test_get_stats(self):
-        """Test des statistiques"""
-        # Ajouter des sessions
-        session = {"token": "test", "expires_at": datetime.now() + timedelta(minutes=30)}
-        self.state.add_session("192.168.1.1", session)
+        """Test de récupération des statistiques"""
+        stats = get_stats()
+        assert 'active_sessions' in stats
+        assert 'queue_size' in stats
+        assert 'total_requests' in stats
+        assert 'uptime_seconds' in stats
 
-        # Ajouter des événements
-        self.state.add_event({"size_bytes": 100})
-        self.state.add_event({"size_bytes": 200})
-
-        stats = self.state.get_stats()
-
-        assert stats["active_sessions"] == 1
-        assert stats["queue_size"] == 2
-        assert stats["total_requests"] == 2
-        assert stats["total_bytes"] == 300
-        assert stats["total_bytes_mb"] == pytest.approx(0.000286, rel=1e-3)
-        assert stats["running"] is True
-
-    def test_serialization(self):
-        """Test de sérialisation des données"""
-        session = {
-            "token": "test",
-            "expires_at": datetime.now() + timedelta(minutes=30)
-        }
-        self.state.add_session("192.168.1.1", session)
-
-        # Vérifier que les dates sont sérialisables
-        stored = self.state.get_session("192.168.1.1")
-        assert "expires_at" in stored
-        assert isinstance(stored["expires_at"], datetime)
-
-
-class TestStateSingleton:
-    """Tests pour l'instance singleton"""
-
-    def test_state_is_singleton(self):
-        """Vérifie que state est bien une instance unique"""
-        from shared.state import state as state1
-        from shared.state import state as state2
-        assert state1 is state2
-
-    def test_state_is_shared_state_instance(self):
-        """Vérifie que state est une instance de SharedState"""
-        from shared.state import state
-        assert isinstance(state, SharedState)
+    def test_reset_stats(self):
+        """Test de réinitialisation des statistiques"""
+        ajouter_evenement({'domain': 'test.com'})
+        ajouter_evenement({'domain': 'test2.com'})
+        
+        stats_avant = get_stats()
+        assert stats_avant['total_requests'] == 2
+        
+        reset_stats()
+        stats_apres = get_stats()
+        assert stats_apres['total_requests'] == 0

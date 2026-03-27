@@ -1,243 +1,96 @@
 """
 api/schemas.py
-Modèles Pydantic pour la validation des données NetCapt.
+Modèles Pydantic pour l'API NetCapt.
 
-Ces modèles assurent l'intégrité et la cohérence des données échangées
-entre les différents composants du système. Toute donnée entrante
-est validée avant traitement.
+Ces modèles définissent la structure des données échangées entre les composants.
+Tous les échanges sont validés automatiquement par Pydantic.
+
+Auteur: Équipe NetCapt
+Date: Sprint 1 - Mars 2026
 """
 
-from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any
-from enum import Enum
+from pydantic import BaseModel, Field, field_validator
+from typing import List, Dict, Optional
+from datetime import datetime
 from uuid import uuid4
-from pydantic import BaseModel, Field, EmailStr, field_validator, ConfigDict
 import re
 
 
-class CategoryEnum(str, Enum):
+# ============================================================================
+# MODÈLES POUR LES SESSIONS
+# ============================================================================
+
+class SessionActive(BaseModel):
     """
-    Catégories de sites web pour la classification des domaines.
-    Utilisée par le pipeline d'analyse pour générer des métriques.
+    Session active d'un utilisateur authentifié.
+    Stockée dans shared.state.sessions_actives.
     """
-    SOCIAL = "Réseaux sociaux"
-    STREAMING_VIDEO = "Streaming vidéo"
-    STREAMING_AUDIO = "Streaming audio"
-    DEVELOPMENT = "Développement"
-    NEWS = "Actualités"
-    SEARCH = "Moteurs de recherche"
-    EMAIL = "Messagerie"
-    ECOMMERCE = "E-commerce"
-    EDUCATION = "Éducation"
-    PRODUCTIVITY = "Productivité"
-    OTHER = "Autre / Inconnu"
-
-
-class HTTPMethodEnum(str, Enum):
-    """Méthodes HTTP supportées par le proxy."""
-    GET = "GET"
-    POST = "POST"
-    PUT = "PUT"
-    DELETE = "DELETE"
-    CONNECT = "CONNECT"
-    HEAD = "HEAD"
-    OPTIONS = "OPTIONS"
-    PATCH = "PATCH"
-    TRACE = "TRACE"
-
-
-# ==================== MODÈLES PORTAIL ====================
-
-class UserRegistration(BaseModel):
-    """
-    Formulaire d'inscription / authentification utilisateur.
-    Reçu du formulaire HTML du portail.
-    """
-    model_config = ConfigDict(
-        extra='forbid',
-        json_schema_extra={
-            "example": {
-                "first_name": "Jean",
-                "last_name": "Dupont",
-                "email": "jean.dupont@example.com",
-                "accepts_cgu": True,
-                "accepts_analytics": False
-            }
-        }
-    )
-
-    first_name: str = Field(
-        ..., 
-        min_length=1, 
-        max_length=50,
-        description="Prénom de l'utilisateur"
-    )
-    last_name: str = Field(
-        ..., 
-        min_length=1, 
-        max_length=50,
-        description="Nom de l'utilisateur"
-    )
-    email: EmailStr = Field(
-        ...,
-        description="Adresse email valide"
-    )
-    accepts_cgu: bool = Field(
-        ...,
-        description="Acceptation obligatoire des CGU (conformité RGPD)"
-    )
-    accepts_analytics: bool = Field(
-        False,
-        description="Acceptation optionnelle de l'analyse des données"
-    )
-
-    @field_validator('accepts_cgu')
-    @classmethod
-    def must_accept_cgu(cls, v: bool) -> bool:
-        """Valide que les CGU sont acceptées (exigence RGPD)."""
-        if not v:
-            raise ValueError("Vous devez accepter les Conditions Générales d'Utilisation")
-        return v
-
-    @field_validator('first_name', 'last_name')
-    @classmethod
-    def validate_name(cls, v: str) -> str:
-        """Valide le nom (caractères autorisés: lettres, espaces, tirets)."""
-        if not re.match(r'^[a-zA-ZÀ-ÿ\s\-]+$', v):
-            raise ValueError("Le nom ne doit contenir que des lettres, espaces et tirets")
-        return v.strip()
+    ip_client: str = Field(..., description="Adresse IP du client")
+    user_id: str = Field(..., description="Identifiant unique de l'utilisateur (email)")
+    session_id: str = Field(default_factory=lambda: str(uuid4()), description="UUID de session")
+    debut: datetime = Field(default_factory=datetime.now, description="Début de la session")
+    expiration: datetime = Field(..., description="Date d'expiration de la session")
+    nb_requetes: int = Field(0, ge=0, description="Nombre de requêtes effectuées")
+    volume_bytes: int = Field(0, ge=0, description="Volume total en octets")
+    categorie_dominante: Optional[str] = Field(None, description="Catégorie la plus visitée")
 
     @property
-    def full_name(self) -> str:
-        """Retourne le nom complet formaté."""
-        return f"{self.first_name} {self.last_name}"
-
-
-class SessionData(BaseModel):
-    """
-    Données d'une session active.
-    Stockée dans shared.state.sessions.
-    """
-    model_config = ConfigDict(extra='forbid')
-
-    token: str = Field(
-        default_factory=lambda: str(uuid4()),
-        description="Token unique de session (UUID v4)"
-    )
-    user_id: str = Field(..., description="Identifiant unique de l'utilisateur (email)")
-    user_name: str = Field(..., description="Nom complet de l'utilisateur")
-    user_email: EmailStr = Field(..., description="Email de l'utilisateur")
-    ip_client: str = Field(..., description="Adresse IP du client")
-    created_at: datetime = Field(
-        default_factory=datetime.now,
-        description="Date et heure de création de la session"
-    )
-    expires_at: datetime = Field(..., description="Date et heure d'expiration")
-    last_activity: datetime = Field(
-        default_factory=datetime.now,
-        description="Dernière activité du client"
-    )
-    request_count: int = Field(0, ge=0, description="Nombre de requêtes effectuées")
-    total_bytes: int = Field(0, ge=0, description="Volume total en octets")
-
-    def is_expired(self) -> bool:
+    def est_expiree(self) -> bool:
         """Vérifie si la session a expiré."""
-        return datetime.now() > self.expires_at
+        return datetime.now() > self.expiration
 
-    def remaining_seconds(self) -> int:
-        """Retourne le nombre de secondes restantes."""
-        if self.is_expired():
+    @property
+    def duree_secondes(self) -> int:
+        """Durée écoulée depuis le début de la session."""
+        return int((datetime.now() - self.debut).total_seconds())
+
+    @property
+    def temps_restant_minutes(self) -> int:
+        """Temps restant en minutes avant expiration."""
+        if self.est_expiree:
             return 0
-        return int((self.expires_at - datetime.now()).total_seconds())
-
-    def remaining_minutes(self) -> int:
-        """Retourne le nombre de minutes restantes."""
-        return self.remaining_seconds() // 60
-
-    @classmethod
-    def create(
-        cls, 
-        user: UserRegistration, 
-        ip_client: str, 
-        duration_minutes: int
-    ) -> "SessionData":
-        """
-        Crée une nouvelle session à partir d'un enregistrement utilisateur.
-
-        Args:
-            user: Données d'enregistrement utilisateur
-            ip_client: Adresse IP du client
-            duration_minutes: Durée de validité en minutes
-
-        Returns:
-            Instance de SessionData prête à être stockée
-        """
-        return cls(
-            user_id=user.email,
-            user_name=user.full_name,
-            user_email=user.email,
-            ip_client=ip_client,
-            expires_at=datetime.now() + timedelta(minutes=duration_minutes)
-        )
+        return int((self.expiration - datetime.now()).total_seconds() // 60)
 
     def to_storage_dict(self) -> dict:
-        """
-        Convertit l'objet en dictionnaire sérialisable pour stockage.
-        Utilisé pour le stockage dans shared.state.
-        """
+        """Convertit l'objet en dictionnaire pour stockage."""
         return {
-            "token": self.token,
-            "user_id": self.user_id,
-            "user_name": self.user_name,
-            "user_email": self.user_email,
             "ip_client": self.ip_client,
-            "created_at": self.created_at.isoformat(),
-            "expires_at": self.expires_at.isoformat(),
-            "last_activity": self.last_activity.isoformat(),
-            "request_count": self.request_count,
-            "total_bytes": self.total_bytes
+            "user_id": self.user_id,
+            "session_id": self.session_id,
+            "debut": self.debut.isoformat(),
+            "expiration": self.expiration.isoformat(),
+            "nb_requetes": self.nb_requetes,
+            "volume_bytes": self.volume_bytes,
+            "categorie_dominante": self.categorie_dominante
         }
 
 
-# ==================== MODÈLES ÉVÉNEMENTS ====================
+# ============================================================================
+# MODÈLES POUR LES ÉVÉNEMENTS DE NAVIGATION
+# ============================================================================
 
-class NavigationEvent(BaseModel):
+class EvenementNavigation(BaseModel):
     """
     Événement de navigation unique.
-    Produit par le proxy, consommé par le pipeline.
+    Produit par le proxy, consommé par le pipeline d'analyse.
     """
-    model_config = ConfigDict(extra='allow')
-
-    timestamp: datetime = Field(
-        default_factory=datetime.now,
-        description="Horodatage précis de la requête"
-    )
+    timestamp: datetime = Field(default_factory=datetime.now, description="Horodatage précis")
     ip_client: str = Field(..., description="Adresse IP du client")
-    user_id: Optional[str] = Field(None, description="Identifiant utilisateur (si authentifié)")
-    session_token: Optional[str] = Field(None, description="Token de session (si authentifié)")
-    method: HTTPMethodEnum = Field(..., description="Méthode HTTP")
-    domain: str = Field(..., description="Domaine cible (ex: google.com)")
-    url_path: str = Field("/", description="Chemin de la ressource")
-    category: CategoryEnum = Field(
-        CategoryEnum.OTHER,
-        description="Catégorie du domaine (déterminée par categoriseur)"
-    )
-    size_bytes: int = Field(0, ge=0, description="Volume en octets")
-    duration_ms: int = Field(0, ge=0, description="Temps de réponse en millisecondes")
-    status_http: int = Field(200, ge=100, lt=600, description="Code HTTP")
-    is_https: bool = Field(False, description="Requête HTTPS (méthode CONNECT)")
-    user_agent: Optional[str] = Field(None, description="User-Agent du navigateur")
-    referer: Optional[str] = Field(None, description="Page d'origine")
+    user_id: str = Field(..., description="Identifiant de l'utilisateur")
+    session_id: str = Field(..., description="Identifiant de la session")
+    methode: str = Field(..., description="Méthode HTTP (GET, POST, CONNECT, etc.)")
+    domaine: str = Field(..., description="Domaine cible (ex: github.com)")
+    url_path: Optional[str] = Field("/", description="Chemin de la ressource")
+    categorie: Optional[str] = Field(None, description="Catégorie du domaine")
+    taille_bytes: int = Field(0, ge=0, description="Volume en octets")
+    duree_ms: int = Field(0, ge=0, description="Temps de réponse en millisecondes")
+    statut_http: int = Field(200, ge=100, lt=600, description="Code HTTP")
+    est_https: bool = Field(False, description="True si requête HTTPS (méthode CONNECT)")
 
-    @field_validator('domain', mode='before')
+    @field_validator('domaine', mode='before')
     @classmethod
-    def normalize_domain(cls, v: str) -> str:
-        """
-        Normalise le domaine :
-        - Met en minuscules
-        - Supprime www.
-        - Supprime les espaces
-        """
+    def normaliser_domaine(cls, v: str) -> str:
+        """Normalise le domaine : minuscules, suppression www."""
         if not v:
             return ""
         v = v.lower().strip()
@@ -245,90 +98,170 @@ class NavigationEvent(BaseModel):
             v = v[4:]
         return v
 
-
-# ==================== MODÈLES MÉTRIQUES ====================
-
-class DomainStats(BaseModel):
-    """Statistiques par domaine."""
-    domain: str
-    category: CategoryEnum
-    request_count: int = Field(..., ge=0)
-    total_bytes: int = Field(..., ge=0)
-    avg_bytes_per_request: float = Field(0.0, ge=0)
-
-    def model_post_init(self, __context):
-        """Calcule la moyenne après initialisation."""
-        if self.request_count > 0:
-            self.avg_bytes_per_request = self.total_bytes / self.request_count
+    @field_validator('methode')
+    @classmethod
+    def valider_methode(cls, v: str) -> str:
+        """Valide la méthode HTTP."""
+        methodes_valides = {'GET', 'POST', 'PUT', 'DELETE', 'CONNECT', 'HEAD', 'OPTIONS', 'PATCH'}
+        v_upper = v.upper()
+        if v_upper not in methodes_valides:
+            raise ValueError(f"Méthode HTTP invalide: {v}")
+        return v_upper
 
 
-class TrafficMetrics(BaseModel):
-    """Métriques agrégées du trafic."""
-    period: str = Field(..., description="Période (5m, 1h, 4h)")
-    total_requests: int = Field(..., ge=0)
-    total_bytes: int = Field(..., ge=0)
-    total_bytes_mb: float = Field(0.0, ge=0)
-    top_domains: List[DomainStats] = Field(default_factory=list)
-    category_distribution: Dict[str, int] = Field(default_factory=dict)
-    hourly_activity: List[Dict[str, Any]] = Field(default_factory=list)
-    active_users: int = Field(..., ge=0)
-    error_rate: float = Field(..., ge=0, le=100)
+# ============================================================================
+# MODÈLES POUR LES MÉTRIQUES DE TRAFIC
+# ============================================================================
 
-    def model_post_init(self, __context):
-        """Calcule les champs dérivés après initialisation."""
-        self.total_bytes_mb = round(self.total_bytes / (1024 * 1024), 2)
+class MetriqueTrafic(BaseModel):
+    """
+    Métriques agrégées du trafic pour une période donnée.
+    Utilisé par l'API /analytics/traffic.
+    """
+    periode: str = Field(..., description="Période (5m, 1h, 4h)")
+    total_requetes: int = Field(..., ge=0, description="Nombre total de requêtes")
+    total_bytes: int = Field(..., ge=0, description="Volume total en octets")
+    top_domaines: List[str] = Field(default_factory=list, description="Top 10 domaines")
+    repartition_categories: Dict[str, int] = Field(default_factory=dict, description="Répartition par catégorie")
 
-
-class SessionInfo(BaseModel):
-    """Information sur une session active pour l'API."""
-    token: str
-    user_id: str
-    user_name: str
-    ip_client: str
-    start_time: datetime
-    expires_at: datetime
-    remaining_minutes: int
-    request_count: int
-    total_bytes_mb: float
-    dominant_category: Optional[str] = None
+    @property
+    def total_bytes_mb(self) -> float:
+        """Volume total en mégaoctets."""
+        return round(self.total_bytes / (1024 * 1024), 2)
 
 
-class AnomalyAlert(BaseModel):
-    """Alerte d'anomalie détectée."""
-    user_id: str
-    user_name: str
+# ============================================================================
+# MODÈLES POUR LES ALERTES D'ANOMALIES
+# ============================================================================
+
+class AlerteAnomalie(BaseModel):
+    """
+    Alerte déclenchée lors de la détection d'une anomalie comportementale.
+    Utilisé par l'API /analytics/anomalies.
+    """
+    user_id: str = Field(..., description="Identifiant de l'utilisateur")
     score_zscore: float = Field(..., description="Score Z-score calculé")
-    volume_session_mb: float = Field(..., description="Volume de la session en Mo")
-    avg_volume_mb: float = Field(..., description="Volume moyen du groupe en Mo")
-    timestamp: datetime = Field(default_factory=datetime.now)
+    volume_session: int = Field(..., ge=0, description="Volume de la session en octets")
+    volume_moyen_groupe: float = Field(..., ge=0, description="Volume moyen du groupe en octets")
+    timestamp_detection: datetime = Field(default_factory=datetime.now, description="Date de détection")
     details: str = Field(..., description="Description détaillée de l'anomalie")
+    acquittee: bool = Field(False, description="Alerte acquittée par un admin")
+    alerte_id: str = Field(default_factory=lambda: str(uuid4()), description="Identifiant unique de l'alerte")
+
+    @property
+    def volume_session_mb(self) -> float:
+        """Volume de la session en mégaoctets."""
+        return round(self.volume_session / (1024 * 1024), 2)
+
+    @property
+    def volume_moyen_groupe_mb(self) -> float:
+        """Volume moyen du groupe en mégaoctets."""
+        return round(self.volume_moyen_groupe / (1024 * 1024), 2)
 
 
-class AlertConfig(BaseModel):
-    """Configuration des seuils d'alerte."""
-    zscore_threshold: float = Field(3.0, ge=0, le=10, description="Seuil Z-score")
-    max_volume_per_session_mb: int = Field(100, ge=0, description="Volume max par session")
-    max_session_duration_minutes: int = Field(30, ge=1, description="Durée max de session")
-    blocked_categories: List[CategoryEnum] = Field(
-        default_factory=list,
-        description="Catégories de sites à bloquer"
-    )
+# ============================================================================
+# MODÈLES POUR LA CONFIGURATION DES SEUILS
+# ============================================================================
 
+class ConfigSeuils(BaseModel):
+    """
+    Configuration des seuils d'alerte et de blocage.
+    Utilisé par l'API /config/thresholds.
+    """
+    zscore_seuil: float = Field(3.0, ge=0, le=10, description="Seuil Z-score pour déclencher une alerte")
+    volume_max_session_mb: int = Field(100, ge=0, description="Volume max par session en mégaoctets")
+    duree_session_max_min: int = Field(30, ge=1, description="Durée max de session en minutes")
+    categories_bloquees: List[str] = Field(default_factory=list, description="Catégories de sites à bloquer")
+
+    @field_validator('categories_bloquees')
+    @classmethod
+    def valider_categories(cls, v: List[str]) -> List[str]:
+        """Valide les catégories bloquées."""
+        categories_valides = {
+            "Réseaux sociaux", "Streaming vidéo", "Streaming audio",
+            "Développement", "Actualités", "Moteurs de recherche",
+            "Messagerie", "E-commerce", "Éducation", "Autre / Inconnu"
+        }
+        for cat in v:
+            if cat not in categories_valides:
+                raise ValueError(f"Catégorie invalide: {cat}")
+        return v
+
+
+# ============================================================================
+# MODÈLES POUR LE PORTAIL D'AUTHENTIFICATION
+# ============================================================================
+
+class UserRegistration(BaseModel):
+    """
+    Formulaire d'inscription utilisateur.
+    Reçu du portail Flask.
+    """
+    first_name: str = Field(..., min_length=1, max_length=50, description="Prénom")
+    last_name: str = Field(..., min_length=1, max_length=50, description="Nom")
+    email: str = Field(..., description="Adresse email")
+    accepts_cgu: bool = Field(..., description="Acceptation des CGU (obligatoire)")
+    accepts_analytics: bool = Field(False, description="Acceptation de l'analyse (optionnel)")
+
+    @field_validator('email')
+    @classmethod
+    def valider_email(cls, v: str) -> str:
+        """Validation simple de l'email."""
+        if '@' not in v or '.' not in v:
+            raise ValueError("Email invalide")
+        return v.lower()
+
+    @field_validator('accepts_cgu')
+    @classmethod
+    def must_accept_cgu(cls, v: bool) -> bool:
+        """Valide que les CGU sont acceptées."""
+        if not v:
+            raise ValueError("Vous devez accepter les Conditions Générales d'Utilisation")
+        return v
+
+    @property
+    def full_name(self) -> str:
+        """Nom complet formaté."""
+        return f"{self.first_name} {self.last_name}"
+
+
+# ============================================================================
+# MODÈLES POUR LES RÉPONSES API
+# ============================================================================
 
 class HealthStatus(BaseModel):
-    """Statut du système pour l'endpoint /health."""
+    """
+    Statut du système pour l'endpoint /health.
+    """
     status: str = Field(..., description="healthy, degraded, unhealthy")
-    components: Dict[str, bool] = Field(..., description="État des composants")
-    active_sessions: int = Field(..., ge=0)
-    dataframe_size: int = Field(..., ge=0)
-    queue_size: int = Field(..., ge=0)
-    uptime_seconds: float = Field(..., ge=0)
-    uptime_formatted: str = Field(..., description="Uptime formaté HH:MM:SS")
+    composants: Dict[str, bool] = Field(..., description="État des composants")
+    sessions_actives: int = Field(..., ge=0, description="Nombre de sessions actives")
+    taille_dataframe: int = Field(..., ge=0, description="Taille du DataFrame en mémoire")
+    taille_queue: int = Field(..., ge=0, description="Nombre d'événements en attente")
+    uptime_secondes: float = Field(..., ge=0, description="Temps d'activité en secondes")
 
 
 class ErrorResponse(BaseModel):
-    """Réponse d'erreur standardisée pour l'API."""
+    """
+    Réponse d'erreur standardisée pour l'API.
+    """
     error: str = Field(..., description="Message d'erreur")
     detail: Optional[str] = Field(None, description="Détails supplémentaires")
     status_code: int = Field(..., description="Code HTTP")
-    timestamp: datetime = Field(default_factory=datetime.now)
+    timestamp: datetime = Field(default_factory=datetime.now, description="Horodatage de l'erreur")
+
+
+# ============================================================================
+# EXPORTS
+# ============================================================================
+
+__all__ = [
+    'SessionActive',
+    'EvenementNavigation',
+    'MetriqueTrafic',
+    'AlerteAnomalie',
+    'ConfigSeuils',
+    'UserRegistration',
+    'HealthStatus',
+    'ErrorResponse',
+]
