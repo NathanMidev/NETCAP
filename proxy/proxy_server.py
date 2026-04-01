@@ -2,7 +2,7 @@ import socket, sys
 import threading
 
 #définition d'un serveur réseau rudimentaire
-# ce serveur attzend la connexion d'un client
+# ce serveur attend la connexion d'un client
 
 # hostname = socket.gethostname()
 #la configuration du serveur
@@ -11,11 +11,11 @@ PORT = 8080
 counter = 0 #comteur des host connectés
 
 ## 1) creation du socket
-monsocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+monPortServeur = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
 ## 2) liaison du socket à une adresse et un port
 try:
-    monsocket.bind((HOST, PORT))#liaison
+    monPortServeur.bind((HOST, PORT))#liaison
 except socket.error as e :
     print(f"La liaison  de socket à 'adresse {HOST} et port {PORT} a échoué: {e}")
     sys.exit() #arret du programme en cas d'erreur
@@ -23,10 +23,10 @@ except socket.error as e :
 while 1:
     ## 3) attent du socket à une connexion d'un client
     print("Servuer prêt, en attente de connexion...")
-    monsocket.listen(5) #le serveur peut gérer jusqu'à 5 connexions simultanément
+    monPortServeur.listen(5) #le serveur peut gérer jusqu'à 5 connexions simultanément
 
     ## 4) etablissement de la connexion 
-    connexion, adresse = monsocket.accept()
+    connexion, adresse = monPortServeur.accept()
     counter += 1
     print("Client connecté depuis l'adresse: ", adresse, "Nombre de clients connectés: ", counter)
 
