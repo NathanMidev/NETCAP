@@ -19,11 +19,12 @@ de leur comportement de navigation.
 - NumPy
 - Tkinter
 
-## Lancement (Sprint 1)
+## Lancement Sprint 1
 
 ```bash
 uvicorn api.main:app --reload
 Puis ouvrir :http://127.0.0.1:8000/docs
+```
 
 ## Lancement Sprint 2 (Proxy HTTP)
 
