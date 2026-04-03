@@ -1,31 +1,67 @@
 import socket, sys
 import threading
+from http_parser import HttpParser, construire_reponse_302, parser_requete_http
+from session_manager import SessionManager
+
+session_manager = SessionManager()
 
 #définition d'un serveur réseau rudimentaire
 # ce serveur attend la connexion d'un client
 def poolClient(connexion, adresse, counter):
     print(f"Connesion d'un appareil depuis l'adresse: {adresse} Nombre de clients connectés: {counter}")
     try:
-        messageServeur = "Bienvenue , vous vous êtes connecté avec succès"
-        connexion.send(messageServeur.encode('utf-8')) #envoi du message de bienvenue au client
-        messsageClient = connexion.recv(1024).decode('utf-8') #réception du message du client
+        #  --------bloc code d'interaction avec le client
+        #messageServeur = "Bienvenue , vous vous êtes connecté avec succès"
+        #connexion.send(messageServeur.encode('utf-8')) #envoi du message de bienvenue au client
+        #messsageClient = connexion.recv(1024).decode('utf-8') #réception du message du client
+        #while True:
+        #    print("Client: ", messsageClient)
+        #    if messsageClient.upper() == "BYE" or messsageClient == "":
+        #        print("Client déconnecté: ", adresse)
+        #        counter -= 1
+        #        break##FIN DE LA CONNEXION ET NOMBRE DE CLIENTS CONNECTÉS DIMINUÉ DE 1
+        #    messageServeur = input("Serveur: ") #saisie du message à envoyer au client
+        #    connexion.send(messageServeur.encode('utf-8')) #envoi du message au client
+        #    connexion.recv(1024).decode('utf-8') #réception du message du client
+        # -----bloc de code interaction client remplacé par traitement HTTP
+        data = connexion.recv(4096)
 
-        while True:
+        if not data :
+            connexion.close()
+            return
+        
+        requette = parser_requete_http(data)
 
-            print("Client: ", messsageClient)
+        if not requette:
+            print("[!] Erreur: Requête invalide")
+            connexion.close()
+            return
 
-            if messsageClient.upper() == "BYE" or messsageClient == "":
+        print(f"[HTTP] {requette}")
 
-                print("Client déconnecté: ", adresse)
-                counter -= 1
+        ip_client = adresse[0]
 
-                break##FIN DE LA CONNEXION ET NOMBRE DE CLIENTS CONNECTÉS DIMINUÉ DE 1
+        # vérification de l'authentification du client
+        if not session_manager.is_authenticated(ip_client):
+            print(f"[!] {ip_client} non authentifié → redirection")
 
-            messageServeur = input("Serveur: ") #saisie du message à envoyer au client
-            connexion.send(messageServeur.encode('utf-8')) #envoi du message au client
-            messsageClient = connexion.recv(1024).decode('utf-8') #réception du message du client
+            url = "http://localhost:5000/portail"
+
+            response = construire_reponse_302(url)
+
+            connexion.send(response)
+            connexion.close()
+            return
+        
+        # réponse temporaire si authentifié
+        response = (
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/plain\r\n\r\n"
+            "Accès autorisé"
+        ).encode()
+        
     except Exception as e:
-        print(f"Erreur lors de la communication avec le client: {e}")
+        print(f"Erreur d'authentification du client: {e}")
     finally:
         connexion.close()
 
@@ -66,39 +102,34 @@ def creationServeur():
         counter += 1
         print("Client connecté depuis l'adresse: ", adresse, "Nombre de clients connectés: ", counter)
 
+        #code de gestion du client déplacé dans une fonction dédiée (poolClient) pour le multithreading
         ## 5) Dialogue avec le client
-
-        messageServeur ="Bienvenue , vous vous êtes connecté avec succès"
-        connexion.send(messageServeur.encode('utf-8')) #envoi du message de bienvenue au client
-        messsageClient = connexion.recv(1024).decode('utf-8') #réception du message du client
-
-        while True:
-
-            print("Client: ", messsageClient)
-
-            if messsageClient.upper() == "BYE" or messsageClient == "":
-
-                print("Client déconnecté: ", adresse)
-                counter -= 1
-
-                break##FIN DE LA CONNEXION ET NOMBRE DE CLIENTS CONNECTÉS DIMINUÉ DE 1
-
-            messageServeur = input("Serveur: ") #saisie du message à envoyer au client
-            connexion.send(messageServeur.encode('utf-8')) #envoi du message au client
-            messsageClient = connexion.recv(1024).decode('utf-8') #réception du message du client
-
+        #messageServeur ="Bienvenue , vous vous êtes connecté avec succès"
+        #connexion.send(messageServeur.encode('utf-8')) #envoi du message de bienvenue au client
+        #messsageClient = connexion.recv(1024).decode('utf-8') #réception du message du client
+        #while True:
+        #    print("Client: ", messsageClient)
+        #    if messsageClient.upper() == "BYE" or messsageClient == "":
+        #        print("Client déconnecté: ", adresse)
+        #        counter -= 1
+        #        break##FIN DE LA CONNEXION ET NOMBRE DE CLIENTS CONNECTÉS DIMINUÉ DE 1
+        #    messageServeur = input("Serveur: ") #saisie du message à envoyer au client
+        #    connexion.send(messageServeur.encode('utf-8')) #envoi du message au client
+        #    messsageClient = connexion.recv(1024).decode('utf-8') #réception du message du client
             ## 6) fermeture de la connexion
-        
-        connexion.send("BYE".encode('utf-8')) #envoi du message de fin de connexion au client
-        connexion.close() #fermeture de la connexion
+        #connexion.send("BYE".encode('utf-8')) #envoi du message de fin de connexion au client
+        #connexion.close() #fermeture de la connexion
+        #ch = input("Voulez-vous continuer? (o/n): ")#applictaion de regex pour vérifier la saisie de l'utilisateur
+        #if ch.lower() != 'o':
+        #    print("Fermeture du serveur...")
+        #    monPortServeur.close() #fermeture du socket du serveur          
+        #    break
 
-        ch = input("Voulez-vous continuer? (o/n): ")#applictaion de regex pour vérifier la saisie de l'utilisateur
         
-        if ch.lower() != 'o':
+        #code de gestion du client déplacé dans une fonction dédiée (poolClient) pour le multithreading
+        #gestion du programme pour qu'il siot autonome en executant la fonction de création du serveur
+        multisessionClient = threading.Thread(target=poolClient, args=(connexion, adresse, counter))
+        multisessionClient.start() #démarrage du thread pour gérer la connexion client de manière
 
-            print("Fermeture du serveur...")
-            
-            break
-        
 if __name__ == "__main__":
     creationServeur() #lancer le serveur quand le script est exécuté directement
