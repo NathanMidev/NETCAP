@@ -28,5 +28,13 @@ Puis ouvrir :http://127.0.0.1:8000/docs
 
 ## Lancement Sprint 2 (Proxy HTTP)
 
+
 ```bash
 python proxy/proxy_server.py
+```
+
+    Puis tester le proxy avec l'adresse en exemple : 
+
+    ```bash 
+    curl -x http://127.0.0.1:8080 http://example.com
+    ```
